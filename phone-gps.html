@@ -221,9 +221,16 @@
 
   <script>
 
-    // Raspberry Pi MQTT WebSocket address
-    // Replace with your Raspberry Pi IP address.
-    const broker = "ws://YOUR_PI_IP:9001";
+    // Cloudflare secure MQTT WebSocket address
+    const broker =
+      "wss://circuits-unnecessary-unexpected-scenarios.trycloudflare.com";
+
+    // Raspberry Pi MQTT authentication
+    const MQTT_USERNAME = "phonegps";
+    const MQTT_PASSWORD = "1234";
+
+    // MQTT topic
+    const GPS_TOPIC = "motorcycle/gps";
 
     let client = null;
     let watchId = undefined;
@@ -233,22 +240,36 @@
       document.getElementById("statusDot").style.background = color;
     }
 
-    // Connect to MQTT broker
+    // Connect to Raspberry Pi MQTT broker
     function connectMQTT() {
 
       if (client) {
         return;
       }
 
-      updateStatus("GPS working. Connecting to MQTT...", "#eab308");
+      updateStatus("Connecting to Raspberry Pi...", "#eab308");
 
       client = mqtt.connect(broker, {
+
         clientId: "phone_gps_" +
-          Math.random().toString(16).slice(2)
+          Math.random().toString(16).slice(2),
+
+        username: MQTT_USERNAME,
+        password: MQTT_PASSWORD,
+
+        protocolVersion: 4,
+        clean: true,
+        connectTimeout: 15000,
+        reconnectPeriod: 3000
+
       });
 
       client.on("connect", () => {
         updateStatus("GPS and MQTT connected", "#22c55e");
+      });
+
+      client.on("reconnect", () => {
+        updateStatus("Reconnecting to Raspberry Pi...", "#eab308");
       });
 
       client.on("error", (error) => {
@@ -260,12 +281,13 @@
           updateStatus("MQTT connection closed", "#ef4444");
         }
       });
+
     }
 
     // Start phone GPS
     function startGPS() {
 
-      if (watchId !== undefined || client) {
+      if (watchId !== undefined) {
         return;
       }
 
@@ -279,9 +301,17 @@
         return;
       }
 
+      if (typeof mqtt === "undefined") {
+        updateStatus("MQTT library failed to load", "#ef4444");
+        return;
+      }
+
       updateStatus("Requesting phone location...", "#eab308");
 
-      // Request GPS before connecting to MQTT
+      // Connect to MQTT broker
+      connectMQTT();
+
+      // Request phone GPS location
       watchId = navigator.geolocation.watchPosition(
 
         (position) => {
@@ -303,28 +333,36 @@
           document.getElementById("accuracy").innerText =
             data.accuracy.toFixed(1);
 
-          updateStatus("GPS location received", "#22c55e");
-
-          // Connect to MQTT after receiving GPS
-          if (!client) {
-            connectMQTT();
-          }
-
-          // Publish GPS coordinates when MQTT is connected
+          // Publish coordinates to Raspberry Pi
           if (client && client.connected) {
 
             client.publish(
-              "motorcycle/gps",
+              GPS_TOPIC,
               JSON.stringify(data),
+              { qos: 0 },
+
               (error) => {
 
                 if (error) {
-                  updateStatus("GPS working, MQTT publish failed", "#ef4444");
+                  updateStatus(
+                    "GPS working, MQTT publish failed",
+                    "#ef4444"
+                  );
                 } else {
-                  updateStatus("Location published successfully", "#22c55e");
+                  updateStatus(
+                    "Location published successfully",
+                    "#22c55e"
+                  );
                 }
 
               }
+            );
+
+          } else {
+
+            updateStatus(
+              "GPS received. Waiting for MQTT...",
+              "#eab308"
             );
 
           }
@@ -366,6 +404,7 @@
       }
 
       updateStatus("GPS stopped", "#64748b");
+
     }
 
   </script>
