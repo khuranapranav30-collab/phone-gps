@@ -1,0 +1,330 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Motorcycle GPS Tracker</title>
+
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      background: #0b1220;
+      color: #f1f5f9;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .dashboard {
+      width: 100%;
+      max-width: 430px;
+      background: #151f32;
+      border: 1px solid #26354d;
+      border-radius: 20px;
+      padding: 25px;
+      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .header .symbol {
+      font-size: 38px;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: 23px;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      font-size: 13px;
+    }
+
+    .status-box {
+      background: #202d42;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 22px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #64748b;
+      flex-shrink: 0;
+    }
+
+    #status {
+      color: #cbd5e1;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .section-title {
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+
+    .data-card {
+      background: #202d42;
+      border: 1px solid #2c3b52;
+      padding: 17px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+    }
+
+    .data-label {
+      color: #94a3b8;
+      font-size: 12px;
+      margin-bottom: 9px;
+    }
+
+    .data-value {
+      font-size: 21px;
+      font-weight: bold;
+      color: #f8fafc;
+      overflow-wrap: anywhere;
+    }
+
+    .unit {
+      font-size: 12px;
+      color: #94a3b8;
+      font-weight: normal;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 12px;
+      margin-top: 25px;
+    }
+
+    button {
+      flex: 1;
+      padding: 15px 10px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    button:active {
+      transform: scale(0.97);
+    }
+
+    .start-btn {
+      background: #16a34a;
+      color: white;
+    }
+
+    .stop-btn {
+      background: #dc2626;
+      color: white;
+    }
+
+    button:hover {
+      filter: brightness(1.1);
+    }
+
+    .footer {
+      text-align: center;
+      color: #64748b;
+      font-size: 11px;
+      margin-top: 25px;
+    }
+
+    @media (max-width: 350px) {
+      .dashboard {
+        padding: 18px;
+      }
+
+      .data-value {
+        font-size: 18px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="dashboard">
+
+    <div class="header">
+      <div class="symbol">🏍️</div>
+      <h2>Motorcycle GPS Tracker</h2>
+      <p class="subtitle">Live Location Monitoring System</p>
+    </div>
+
+    <div class="status-box">
+      <div class="status-dot" id="statusDot"></div>
+      <p id="status">Not started</p>
+    </div>
+
+    <p class="section-title">LOCATION INFORMATION</p>
+
+    <div class="data-card">
+      <p class="data-label">LATITUDE</p>
+      <p class="data-value" id="lat">--</p>
+    </div>
+
+    <div class="data-card">
+      <p class="data-label">LONGITUDE</p>
+      <p class="data-value" id="lon">--</p>
+    </div>
+
+    <div class="data-card">
+      <p class="data-label">GPS ACCURACY</p>
+      <p class="data-value">
+        <span id="accuracy">--</span>
+        <span class="unit">metres</span>
+      </p>
+    </div>
+
+    <div class="buttons">
+      <button class="start-btn" onclick="startGPS()">
+        ▶ Start GPS
+      </button>
+
+      <button class="stop-btn" onclick="stopGPS()">
+        ■ Stop GPS
+      </button>
+    </div>
+
+    <p class="footer">
+      Motorcycle Accident Alert System
+    </p>
+
+  </div>
+
+  <script>
+    // Raspberry Pi MQTT WebSocket address
+    const broker = "ws://YOUR_PI_IP:9001";
+
+    let client;
+    let watchId;
+
+    function updateStatus(message, color) {
+      document.getElementById("status").innerText = message;
+      document.getElementById("statusDot").style.background = color;
+    }
+
+    function startGPS() {
+
+      if (watchId !== undefined || client) {
+        return;
+      }
+
+      if (!navigator.geolocation) {
+        updateStatus("Location not supported", "#ef4444");
+        return;
+      }
+
+      updateStatus("Connecting to MQTT...", "#eab308");
+
+      client = mqtt.connect(broker, {
+        clientId: "phone_gps_" +
+          Math.random().toString(16).slice(2)
+      });
+
+      client.on("connect", () => {
+
+        updateStatus("MQTT connected. Getting location...", "#eab308");
+
+        watchId = navigator.geolocation.watchPosition(
+
+          (position) => {
+
+            const data = {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+              timestamp: Date.now()
+            };
+
+            document.getElementById("lat").innerText =
+              data.latitude.toFixed(6);
+
+            document.getElementById("lon").innerText =
+              data.longitude.toFixed(6);
+
+            document.getElementById("accuracy").innerText =
+              data.accuracy.toFixed(1);
+
+            client.publish(
+              "motorcycle/gps",
+              JSON.stringify(data),
+              (error) => {
+                if (error) {
+                  updateStatus("Failed to publish GPS data", "#ef4444");
+                } else {
+                  updateStatus("Location published successfully", "#22c55e");
+                }
+              }
+            );
+          },
+
+          (error) => {
+            updateStatus("Location error: " + error.message, "#ef4444");
+          },
+
+          {
+            enableHighAccuracy: true,
+            maximumAge: 1000,
+            timeout: 15000
+          }
+        );
+      });
+
+      client.on("error", (error) => {
+        updateStatus("MQTT error: " + error.message, "#ef4444");
+      });
+
+      client.on("close", () => {
+        if (client) {
+          updateStatus("MQTT connection closed", "#ef4444");
+        }
+      });
+    }
+
+    function stopGPS() {
+
+      if (watchId !== undefined) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = undefined;
+      }
+
+      if (client) {
+        client.end();
+        client = null;
+      }
+
+      updateStatus("GPS stopped", "#64748b");
+    }
+  </script>
+
+</body>
+</html>
