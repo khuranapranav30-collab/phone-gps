@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -223,7 +224,7 @@
 
     // Cloudflare secure MQTT WebSocket address
     const broker =
-      "wss://developers.cloudflare.com"
+      "wss://discovered-government-insured-pulled.trycloudflare.com";
 
     // Raspberry Pi MQTT authentication
     const MQTT_USERNAME = "phonegps";
@@ -235,12 +236,74 @@
     let client = null;
     let watchId = undefined;
 
+    // Screen Wake Lock
+    let wakeLock = null;
+
     function updateStatus(message, color) {
       document.getElementById("status").innerText = message;
       document.getElementById("statusDot").style.background = color;
     }
 
-    // Connect to Raspberry Pi MQTT broker
+    async function requestScreenWakeLock() {
+
+      if (!("wakeLock" in navigator)) {
+        console.log("Screen Wake Lock is not supported.");
+        return;
+      }
+
+      // Only request when website is visible
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      // Avoid requesting another lock if already active
+      if (wakeLock && !wakeLock.released) {
+        return;
+      }
+
+      try {
+
+        wakeLock = await navigator.wakeLock.request("screen");
+
+        console.log("Screen will stay awake.");
+
+        wakeLock.addEventListener("release", () => {
+
+          console.log("Screen Wake Lock released.");
+
+          wakeLock = null;
+
+          // Try again if GPS tracking is still active
+          if (
+            watchId !== undefined &&
+            document.visibilityState === "visible"
+          ) {
+            requestScreenWakeLock();
+          }
+
+        });
+
+      } catch (error) {
+
+        console.error("Wake Lock error:", error);
+
+      }
+    }
+
+    // Reacquire Wake Lock when Chrome becomes visible again
+    document.addEventListener("visibilitychange", () => {
+
+      if (
+        document.visibilityState === "visible" &&
+        watchId !== undefined
+      ) {
+
+        requestScreenWakeLock();
+
+      }
+
+    });
+    
     function connectMQTT() {
 
       if (client) {
@@ -284,7 +347,6 @@
 
     }
 
-    // Start phone GPS
     function startGPS() {
 
       if (watchId !== undefined) {
@@ -307,6 +369,9 @@
       }
 
       updateStatus("Requesting phone location...", "#eab308");
+
+      // Keep phone screen awake
+      requestScreenWakeLock();
 
       // Connect to MQTT broker
       connectMQTT();
@@ -371,7 +436,13 @@
 
         (error) => {
 
-          watchId = undefined;
+          if (watchId !== undefined) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = undefined;
+          }
+
+          // Release screen lock if GPS fails
+          releaseScreenWakeLock();
 
           updateStatus(
             "GPS error: " + error.message,
@@ -390,7 +461,23 @@
 
     }
 
-    // Stop GPS and MQTT
+    async function releaseScreenWakeLock() {
+
+      if (wakeLock) {
+
+        try {
+          await wakeLock.release();
+          wakeLock = null;
+          console.log("Screen Wake Lock stopped.");
+
+        } catch (error) {
+          console.error("Wake Lock release error:", error);
+        }
+
+      }
+
+    }
+
     function stopGPS() {
 
       if (watchId !== undefined) {
@@ -398,12 +485,16 @@
         watchId = undefined;
       }
 
+      // Release screen Wake Lock
+      releaseScreenWakeLock();
+
+      // Disconnect MQTT
       if (client) {
         client.end();
         client = null;
       }
 
-      updateStatus("GPS stopped", "#64748b");
+      updateStatus("GPS stopped. Screen lock released.", "#64748b");
 
     }
 
